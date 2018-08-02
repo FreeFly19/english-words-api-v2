@@ -20,17 +20,24 @@ package object phrase {
   case class Phrase(id: Long, text: String, createdAt: Timestamp)
 
   class PhraseRepository {
-    def findAll: ConnectionIO[List[Phrase]] =
+    def findAll(page: Long, size: Long): ConnectionIO[List[Phrase]] =
       sql"select id, text, created_at as createdAt from phrases"
         .query[Phrase]
+        .stream
+        .drop(size * page)
+        .take(size)
+        .compile
         .to[List]
   }
 
   class PhraseService(phraseRepository: PhraseRepository,
                       xa: Transactor[IO]) {
+    object PageQueryParam extends OptionalQueryParamDecoderMatcher[Long]("page")
+    object SizeQueryParam extends OptionalQueryParamDecoderMatcher[Long]("size")
+
     val service = HttpService[IO] {
-      case GET -> Root / "api" / "phrases" =>
-        Ok(phraseRepository.findAll.transact(xa).map(_.asJson))
+      case GET -> Root / "api" / "phrases" :? PageQueryParam(page) :? SizeQueryParam(size) =>
+        Ok(phraseRepository.findAll(page.getOrElse(0), size.getOrElse(10)).transact(xa).map(_.asJson))
     }
   }
 
