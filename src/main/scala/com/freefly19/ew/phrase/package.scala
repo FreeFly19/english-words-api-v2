@@ -6,6 +6,7 @@ import cats.effect.IO
 import doobie.free.connection.ConnectionIO
 import doobie.implicits._
 import doobie.util.transactor.Transactor
+import fs2.Stream
 import io.circe.Encoder
 import io.circe.generic.auto._
 import io.circe.syntax._
@@ -18,16 +19,23 @@ package object phrase {
   implicit val timestampEncoder: Encoder[Timestamp] = a => a.getTime.asJson
 
   case class Phrase(id: Long, text: String, createdAt: Timestamp)
+  case class PhraseWithTranslations(id: Long, text: String, createdAt: Timestamp, translations: List[String]) {
+    def this(p: Phrase, translations: List[String]) = this(p.id, p.text, p.createdAt, translations)
+  }
 
   class PhraseRepository {
-    def findAll(page: Long, size: Long): ConnectionIO[List[Phrase]] =
+    def findAll(page: Long, size: Long): ConnectionIO[List[PhraseWithTranslations]] =
       sql"select id, text, created_at as createdAt from phrases"
         .query[Phrase]
         .stream
         .drop(size * page)
         .take(size)
+        .flatMap(p => Stream.eval(getTranslations(p.id).map(l => new PhraseWithTranslations(p, l))))
         .compile
         .to[List]
+
+    def getTranslations(phraseId: Long) =
+      sql"select value from translations where phrase_id = $phraseId".query[String].to[List]
   }
 
   class PhraseService(phraseRepository: PhraseRepository,
